@@ -14,11 +14,11 @@ const pad = (n) => String(n).padStart(2, "0");
 const MAX_PRINTS = 4;
 
 /* ---------- room overlay (shared with scene5.js) ---------- */
-const roomEl = $("room"), hintEl = $("rmHint"), countEl = $("rmCount"), backEl = $("rmBack"), nextEl = $("rmNext"), annEl = $("rmAnn");
+const roomEl = $("room"), hintEl = $("rmHint"), altEl = $("rmAlt"), backEl = $("rmBack"), nextEl = $("rmNext"), annEl = $("rmAnn");
 const UI = {
   show(on) { roomEl.classList.toggle("on", on); roomEl.setAttribute("aria-hidden", on ? "false" : "true"); },
   hint(t) { hintEl.classList.remove("show"); clearTimeout(hintEl._h); hintEl._h = setTimeout(() => { hintEl.textContent = t; hintEl.classList.toggle("show", !!t); }, REDUCED ? 0 : 200); },
-  count(t) { countEl.textContent = t || ""; },
+  alt(t, fn) { altEl.textContent = t || ""; altEl.classList.toggle("show", !!t); altEl.onclick = fn || null; },
   back(t, fn) { backEl.textContent = t || ""; backEl.classList.toggle("show", !!t); backEl.onclick = fn || null; },
   next(t, fn) { nextEl.textContent = t || ""; nextEl.classList.toggle("show", !!t); nextEl.onclick = fn || null; },
   ann(t, world) { annEl.classList.toggle("show", !!t); if (t) { $("rmAnnText").textContent = t; UI.annAt = world; } else UI.annAt = null; },
@@ -31,6 +31,31 @@ DR.scene2.hooks.push(() => {
   annEl.style.left = ((p.x + 1) / 2 * canvas.clientWidth) + "px"; annEl.style.top = ((1 - p.y) / 2 * canvas.clientHeight) + "px";
 });
 DR.prints = [];   // [{ roll, k }] in the order they were circled
+const savePrints = () => DR.store && DR.store.set("dr-prints", JSON.stringify(DR.prints));
+/* coming straight to the tray or the wall (index, or a later visit): use what she circled last time, else a default pick */
+function ensurePrints() {
+  if (DR.prints.length) return;
+  const rolls = rollsData(), ok = (p) => p && rolls[p.roll] && rolls[p.roll].frames[p.k];
+  let list = []; try { list = JSON.parse((DR.store && DR.store.get("dr-prints")) || "[]"); } catch (e) { list = []; }
+  list = Array.isArray(list) ? list.filter(ok).slice(0, MAX_PRINTS) : [];
+  DR.prints = list.length ? list : [{ roll: 0, k: 0 }, { roll: 1, k: 3 }, { roll: 2, k: 7 }].filter(ok);
+}
+/* every room is hidden before the next one shows itself */
+function leaveAll() {
+  if (sheet.mesh) sheet.mesh.visible = false;
+  if (sheet.stroke) { sheet.stroke = null; sfx.scribbleStop(); }
+  if (tray.group) {
+    tray.group.visible = false; tray.prints.forEach((p) => (p.grp.visible = false));
+    if (!["ready", "all", "developing", "await-lift"].includes(tray.state)) tray.key = null;   // left mid-move: start that room over next time
+  }
+  DR.scene5 && DR.scene5.hide();
+  roomEl.classList.remove("wall"); $("cap").classList.remove("show");
+  UI.back(""); UI.next(""); UI.alt(""); UI.ann(""); UI.hint("");
+}
+function goDesk() {
+  if (!DR.scene2.room()) { DR.scene2.unpick(); return; }
+  DR.scene2.fade(() => { leaveAll(); UI.show(false); DR.scene2.enterRoom(null, null, { instant: true }); DR.hud && DR.hud("SCENE 02 — 胶卷"); });
+}
 
 function rollsData() { return (DR.content && DR.content.rolls) || []; }
 function loadImg(src) { return new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = src; }); }
@@ -85,6 +110,21 @@ async function buildSheet() {
   sheet.mesh.rotation.x = -Math.PI / 2; sheet.mesh.position.copy(SHEET_POS); sheet.mesh.receiveShadow = true;
   sheet.mesh.visible = false; scene.add(sheet.mesh);
 }
+function inkCircle(c) {   // a marker circle around one frame, drawn as if by hand
+  const pts = []; for (let a = -.2; a <= 6.6; a += .25) pts.push({ x: c.x + c.w / 2 + Math.cos(a) * c.w * .72 * (1 + .05 * Math.sin(a * 3)), y: c.y + c.h / 2 + Math.sin(a) * c.h * .66 });
+  for (let i = 2; i < pts.length; i++) inkSegment(pts[i - 2], pts[i - 1], pts[i]);
+  return pts;
+}
+/* the sheet always shows what is in DR.prints: redraw the ink when the selection came from somewhere else */
+function syncSheetInk() {
+  const key = JSON.stringify(DR.prints); if (sheet.inked === key) return;
+  sheet.ink.getContext("2d").clearRect(0, 0, SW, SH);
+  for (const p of DR.prints) { const c = sheet.cells.find((x) => x.roll === p.roll && x.k === p.k); if (c) inkCircle(c); }
+  sheet.inked = key; sheet.dirty = true;
+}
+function clearSheet() {
+  DR.prints = []; savePrints(); sheet.ink.getContext("2d").clearRect(0, 0, SW, SH); sheet.inked = "[]"; sheet.dirty = true; sfx.paper(); sheetCount();
+}
 function composite() { const g = sheet.comp.getContext("2d"); g.drawImage(sheet.base, 0, 0); g.drawImage(sheet.ink, 0, 0); if (sheet.tex) sheet.tex.needsUpdate = true; }
 DR.scene2.hooks.push(() => { if (sheet.dirty) { sheet.dirty = false; composite(); } });
 
@@ -122,8 +162,8 @@ function circled(pts) {   // which frame (if any) did this stroke go around?
   return best;
 }
 function sheetCount() {
-  UI.count(`已圈 ${DR.prints.length} / ${MAX_PRINTS}`);
   UI.next(DR.prints.length ? "去冲洗 →" : "", () => openTray());
+  UI.alt(DR.prints.length ? "擦掉重圈" : "", clearSheet);
 }
 function sheetDown(e) {
   const p = sheetPoint(e); if (!p) return;
@@ -143,17 +183,18 @@ function sheetUp() {
   const c = circled(st.pts); if (!c) return;   // anything else (a heart, a word) is just ink
   if (DR.prints.some((p) => p.roll === c.roll && p.k === c.k)) return;
   if (DR.prints.length >= MAX_PRINTS) { DR.toast && DR.toast(`最多冲洗 ${MAX_PRINTS} 张`); return; }
-  DR.prints.push({ roll: c.roll, k: c.k }); sfx.tick(.7); sheetCount();
+  DR.prints.push({ roll: c.roll, k: c.k }); sheet.inked = JSON.stringify(DR.prints); savePrints();
+  sfx.tick(.7); setTimeout(() => sfx.tick(.4), 90); sheetCount();
 }
 
 function openSheet() {
   DR.scene2.fade(async () => {
-    await buildSheet();
-    sheet.mesh.visible = true; tray.group && (tray.group.visible = false);
+    await buildSheet(); leaveAll(); syncSheetInk();
+    sheet.mesh.visible = true;
     DR.scene2.enterRoom("sheet", VIEW_SHEET, { instant: true });
-    UI.show(true); DR.hud && DR.hud("SCENE 04 — 印样", "04 / 05");
+    UI.show(true); DR.hud && DR.hud("SCENE 04 — 印样");
     UI.hint("圈出想冲洗的照片，最多 4 张。画个爱心，就是你最喜欢它"); sheetCount();
-    UI.back("← 回到胶卷", () => DR.scene2.fade(() => { sheet.mesh.visible = false; UI.show(false); UI.ann(""); DR.scene2.enterRoom(null, null, { instant: true }); }));
+    UI.back("← 回到胶卷", goDesk);
   });
 }
 addEventListener("darkroom:sheet", openSheet);
@@ -166,7 +207,8 @@ const VIEW_TRAY = { pos: new THREE.Vector3(X0, 3.9, 10.6), look: new THREE.Vecto
 const TRAY_C = new THREE.Vector3(X0, 0, .45), LIQ_Y = .2, LINE_Y = 3.3, LINE_Z = -1.7;
 const PAPER_POS = new THREE.Vector3(X0 - 3.35, 0, 1.0), TONGS_HOME = new THREE.Vector3(X0 + 2.25, .1, 1.35);
 const FRONT = new THREE.Vector3(X0, 2.3, 5.4);
-const tray = { group: null, liquid: null, ripples: [], paper: null, paperLabel: null, tongs: null, prints: [], state: "idle", cur: -1, anim: null };
+const tray = { group: null, liquid: null, ripples: [], paper: null, paperLabel: null, tongs: null, prints: [], state: "idle", cur: -1, anim: null, level: 0, drops: [], key: null };
+const EMPTY_Y = .05;
 
 function canvasTex(c) { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t; }
 function buildTray() {
@@ -182,6 +224,8 @@ function buildTray() {
   safe.castShadow = true; safe.shadow.mapSize.set(matchMedia("(pointer: coarse)").matches ? 512 : 1024, matchMedia("(pointer: coarse)").matches ? 512 : 1024); safe.shadow.radius = 5; safe.shadow.bias = -.0005;
   g.add(safe, safe.target);
   const fill = new THREE.PointLight("#ff6a4a", 6, 12, 2); fill.position.set(X0 - 3, 3, 4); g.add(fill);
+  tray.light = (v) => { safe.intensity = 420 * v; fill.intensity = 6 * v; };
+  DR.scene2.motes(g, new THREE.Vector3(X0, 2.6, 1.5), new THREE.Vector3(9, 4.6, 6), "#ff8a66");
   // tray
   const metal = new THREE.MeshStandardMaterial({ color: "#a39c95", metalness: .85, roughness: .32 });
   const tw = 3.4, td = 2.4, th = .3, wt = .06;
@@ -191,8 +235,9 @@ function buildTray() {
     const lip = new THREE.Mesh(new THREE.BoxGeometry(w + (d === wt ? .06 : .1), .03, d + (w === wt ? .06 : .1)), metal); lip.position.set(TRAY_C.x + x, th, TRAY_C.z + z); g.add(lip);
   }
   const lg = new THREE.PlaneGeometry(tw - .12, td - .12, 56, 40); lg.rotateX(-Math.PI / 2);
-  tray.liquid = new THREE.Mesh(lg, new THREE.MeshStandardMaterial({ color: "#3a1510", transparent: true, opacity: .5, roughness: .06, metalness: .35, depthWrite: false }));
+  tray.liquid = new THREE.Mesh(lg, new THREE.MeshStandardMaterial({ color: "#4a1a12", transparent: true, opacity: .58, roughness: .05, metalness: .4, depthWrite: false }));
   tray.liquid.position.set(TRAY_C.x, LIQ_Y, TRAY_C.z); tray.liquid.renderOrder = 2; g.add(tray.liquid);
+  setLevel(REDUCED ? 1 : 0);
   tray.liquidBase = Float32Array.from(lg.attributes.position.array);
   // paper stack with a hand-written count
   tray.paper = new THREE.Mesh(new THREE.BoxGeometry(1.15, .1, 1.45), new THREE.MeshStandardMaterial({ color: "#eee4d2", roughness: .9 }));
@@ -213,9 +258,21 @@ function buildTray() {
   const glass = new THREE.MeshStandardMaterial({ color: "#1c1210", metalness: .3, roughness: .35 });
   const brass = new THREE.MeshStandardMaterial({ color: "#b49a6a", metalness: .9, roughness: .3 });
   for (const [x, z, h] of [[3.5, -.9, 1.05], [4.25, -.55, .85], [3.75, .05, .75]]) {
-    const b = new THREE.Mesh(new THREE.CylinderGeometry(.33, .33, h, 32), glass); b.position.set(X0 + x, h / 2, z); b.castShadow = true; g.add(b);
-    const c = new THREE.Mesh(new THREE.CylinderGeometry(.2, .22, .14, 24), brass); c.position.set(X0 + x, h + .07, z); g.add(c);
+    const bottle = new THREE.Group(); bottle.position.set(X0 + x, 0, z); g.add(bottle);
+    const b = new THREE.Mesh(new THREE.CylinderGeometry(.33, .33, h, 32), glass); b.position.y = h / 2; b.castShadow = true; bottle.add(b);
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(.17, .2, .1, 24), glass); neck.position.y = h + .05; bottle.add(neck);
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(.2, .22, .14, 24), brass); c.position.set(X0 + x, h + .12, z); c.castShadow = true; g.add(c);
+    if (h === .75) tray.pourer = { bottle, cap: c, h: h + .1, home: bottle.position.clone(), capHome: c.position.clone() };   // the one in front does the pouring
   }
+  // the stream of developer and the drops that fall off a wet print
+  // where the stream lands: a pool that spreads out first, and a ring of froth
+  tray.pool = new THREE.Mesh(new THREE.CircleGeometry(1, 40), new THREE.MeshStandardMaterial({ color: "#4a1a12", transparent: true, opacity: .62, roughness: .05, metalness: .4, depthWrite: false }));
+  tray.pool.rotation.x = -Math.PI / 2; tray.pool.visible = false; tray.pool.renderOrder = 2; g.add(tray.pool);
+  tray.froth = new THREE.Mesh(new THREE.RingGeometry(.05, .13, 28), new THREE.MeshBasicMaterial({ color: "#ffb39a", transparent: true, opacity: .5, depthWrite: false, blending: THREE.AdditiveBlending }));
+  tray.froth.rotation.x = -Math.PI / 2; tray.froth.visible = false; tray.froth.renderOrder = 3; g.add(tray.froth);
+  tray.stream = new THREE.Mesh(new THREE.CylinderGeometry(.04, .03, 1, 12), new THREE.MeshStandardMaterial({ color: "#7a2418", emissive: "#3a0d08", roughness: .1, metalness: .3, transparent: true, opacity: .8 }));
+  tray.stream.visible = false; g.add(tray.stream);
+  tray.dropGeo = new THREE.SphereGeometry(.022, 8, 6); tray.dropMat = new THREE.MeshStandardMaterial({ color: "#8a2a1c", emissive: "#3a0d08", roughness: .1, metalness: .3 });
   // drying line
   const line = new THREE.Mesh(new THREE.CylinderGeometry(.012, .012, 12, 8), new THREE.MeshStandardMaterial({ color: "#d8cfc0", roughness: .7 }));
   line.rotation.z = Math.PI / 2; line.position.set(X0, LINE_Y, LINE_Z); g.add(line);
@@ -227,6 +284,57 @@ function paperLabel() {
   g.fillStyle = "rgba(42,34,28,.45)"; g.font = '500 18px "Darkroom Mono", "IBM Plex Mono", monospace'; g.fillText("PHOTO PAPER", 22, 40);
   g.fillStyle = "#b3242f"; g.font = '64px "Darkroom Hand", "Long Cang", "Kaiti SC", cursive'; g.fillText(`相纸 · ${left}`, 22, 130);
   tray.paperLabel.material.map.needsUpdate = true;
+}
+
+/* developer in the tray: 0 = empty, 1 = full */
+function setLevel(v) {
+  tray.level = v; tray.liquid.position.y = EMPTY_Y + (LIQ_Y - EMPTY_Y) * v;
+  tray.liquid.material.opacity = .58 * Math.min(1, Math.max(0, v - .12) * 3.5); tray.liquid.visible = v > .12;
+}
+/* the tray starts empty: the front bottle is uncapped, carried over and poured in, then put back */
+function pourIn(done) {
+  const P = tray.pourer, b = P.bottle, TILT = 1.95;
+  const mouth = v3(TRAY_C.x + .85, 1.25, TRAY_C.z + .15), sx = mouth.x - .03;
+  const at = (a) => v3(mouth.x + Math.sin(a) * P.h, mouth.y - Math.cos(a) * P.h, mouth.z);   // bottle base for a given tilt, mouth held still
+  const up = at(0), capSide = P.capHome.clone().add(v3(.55, 0, .45)).setY(.07);
+  tray.state = "pouring"; UI.hint("先倒上显影液……");
+  const c0 = P.capHome.clone(); sfx.tick(.5);
+  run(.35, (e) => { P.cap.position.lerpVectors(c0, capSide, e); P.cap.position.y += Math.sin(e * Math.PI) * .35; }, () => {
+    run(.7, (e) => { b.position.lerpVectors(P.home, up, e); b.position.y += Math.sin(e * Math.PI) * .2; }, () => {
+      run(.45, (e) => { b.rotation.z = TILT * e; b.position.copy(at(TILT * e)); }, () => {
+        sfx.pour(2.4); tray.stream.visible = true; let rip = 0;
+        run(2.4, (e, x) => {
+          setLevel(Math.min(1, x)); const top = mouth.y - .04, bot = tray.liquid.position.y, t = performance.now() / 1000;
+          // the first splash spreads into a pool around the stream, then the whole tray fills
+          const pr = Math.min(1, x / .35); tray.pool.visible = true; tray.pool.position.set(sx - .25 * pr, bot + .002, mouth.z);
+          tray.pool.scale.setScalar(.08 + 1.1 * (1 - Math.pow(1 - pr, 2))); tray.pool.material.opacity = .62 * (x < .5 ? 1 : 1 - (x - .5) * 2);
+          tray.froth.visible = true; tray.froth.position.set(sx, bot + .006, mouth.z); tray.froth.scale.setScalar(1 + Math.sin(t * 23) * .15); tray.froth.material.opacity = .35 + Math.sin(t * 17) * .12;
+          tray.stream.position.set(sx, (top + bot) / 2, mouth.z); tray.stream.scale.set(1 + Math.sin(t * 38) * .18, top - bot, 1 + Math.cos(t * 31) * .18);
+          if (x > rip) { rip += .09; ripple(sx + (Math.random() - .5) * .1, mouth.z + (Math.random() - .5) * .1, .02); }
+          b.rotation.z = TILT + Math.sin(t * 3) * .02 + x * .12; b.position.copy(at(b.rotation.z));
+        }, () => {
+          tray.stream.visible = tray.pool.visible = tray.froth.visible = false; setLevel(1); for (let i = 0; i < 3; i++) setTimeout(() => { drop(v3(sx, mouth.y - .06, mouth.z)); }, 120 + i * 260);
+          const r0 = b.rotation.z;
+          run(.4, (e) => { b.rotation.z = r0 * (1 - e); b.position.copy(at(b.rotation.z)); }, () => {
+            run(.65, (e) => { b.position.lerpVectors(up, P.home, e); b.position.y += Math.sin(e * Math.PI) * .2; }, () => {
+              const c1 = P.cap.position.clone();
+              run(.3, (e) => { P.cap.position.lerpVectors(c1, P.capHome, e); P.cap.position.y += Math.sin(e * Math.PI) * .3; }, () => { sfx.tick(.5); done(); });
+            });
+          });
+        });
+      });
+    });
+  });
+}
+function drop(from) {
+  if (REDUCED) return; const m = new THREE.Mesh(tray.dropGeo, tray.dropMat); m.position.copy(from); tray.group.add(m); tray.drops.push({ m, vy: 0 });
+}
+function updateDrops(dt) {
+  for (let i = tray.drops.length - 1; i >= 0; i--) {
+    const d = tray.drops[i]; d.vy -= 9 * dt; d.m.position.y += d.vy * dt; d.m.scale.y = 1 + Math.min(1.2, -d.vy * .25);
+    const p = d.m.position, inTray = Math.abs(p.x - TRAY_C.x) < 1.6 && Math.abs(p.z - TRAY_C.z) < 1.1;
+    if (p.y < (inTray ? tray.liquid.position.y : .02)) { if (inTray) { ripple(p.x, p.z, .012); sfx.drip(); } tray.group.remove(d.m); tray.drops.splice(i, 1); }
+  }
 }
 
 /* print = front (develops from white) + back (hand-written note) */
@@ -277,7 +385,7 @@ async function makePrint(p, idx) {
   peg.position.set(0, PH / 2 + .02, .02); peg.visible = false; grp.add(peg);
   scene.add(grp);
   const glow = (v) => { mat.emissiveIntensity = v; back.material.emissiveIntensity = v; };
-  return { grp, front, mat, peg, PW, PH, slot: idx, state: "new", sway: Math.random() * 6, glow };
+  return { grp, front, mat, peg, PW, PH, slot: idx, state: "new", sway: Math.random() * 6, swing: 0, wet: 0, glow };
 }
 function slotPos(i, pr) { const n = DR.prints.length, gap = Math.min(1.9, 8 / Math.max(1, n)); return new THREE.Vector3(X0 + (i - (n - 1) / 2) * gap, LINE_Y - pr.PH / 2 - .03, LINE_Z + .05); }
 
@@ -292,8 +400,14 @@ DR.scene2.hooks.push((dt, k, t) => {
     const u = cur.mat.userData.u.uDev; u.value = Math.min(1, u.value + dt / 4);
     if (u.value >= 1) { tray.state = "await-lift"; UI.hint("用夹子把它夹起来"); UI.ann("夹子", TONGS_HOME.clone().add(new THREE.Vector3(.2, .2, 0))); }
   }
-  // hung prints sway a little
-  tray.prints.forEach((p) => { if (p.state === "hung") p.grp.rotation.z = REDUCED ? 0 : Math.sin(t * 1.1 + p.sway) * .025; });
+  // hung prints sway a little; a freshly pegged one swings and drips for a moment
+  tray.prints.forEach((p) => {
+    if (p.state !== "hung") return;
+    p.swing = Math.max(0, p.swing - dt * .55);
+    p.grp.rotation.z = REDUCED ? 0 : Math.sin(t * 1.1 + p.sway) * .025 + Math.sin(t * 5.2) * .11 * p.swing * p.swing;
+    if (p.wet > 0 && (p.wet -= dt) < p.nextDrip) { p.nextDrip = p.wet - .5 - Math.random() * .7; drop(p.grp.position.clone().add(v3((Math.random() - .5) * p.PW * .7, -p.PH / 2, 0))); }
+  });
+  updateDrops(dt);
   // ripples on the developer
   updateLiquid(dt);
 });
@@ -342,13 +456,14 @@ function liftPrint() {
         pr.grp.position.lerpVectors(p0, lifted, e); pr.grp.rotation.set(-Math.PI / 2 * (1 - e), 0, .04 * (1 - e));
       }, () => {
         ripple(TRAY_C.x, TRAY_C.z, .02);
+        for (let i = 0; i < 4; i++) setTimeout(() => { if (pr.state !== "hung") drop(pr.grp.position.clone().add(v3((Math.random() - .5) * pr.PW * .6, -pr.PH / 2, 0))); }, i * 190);
         const s = slotPos(pr.slot, pr), l0 = pr.grp.position.clone(), tl = tg.position.clone();
         // 4) over to the line; the tongs go home
         run(.85, (e) => {
           pr.grp.position.lerpVectors(l0, s, e); pr.grp.position.y += Math.sin(e * Math.PI) * .25;
           tg.position.lerpVectors(tl, TONGS_HOME, e); tg.rotation.set(-Math.PI / 2 * (1 - e), homeR.y * e, 0);
         }, () => {
-          tg.rotation.copy(homeR); pr.peg.visible = true; pr.state = "hung"; sfx.clip();
+          tg.rotation.copy(homeR); pr.peg.visible = true; pr.state = "hung"; pr.swing = 1; pr.wet = 3.2; pr.nextDrip = 2.9; sfx.clip();
           hungOne(pr);
         });
       });
@@ -357,7 +472,6 @@ function liftPrint() {
 }
 function hungOne(pr) {
   const done = tray.prints.length;
-  UI.count(`${done} / ${DR.prints.length} 晾好`);
   if (done === 1) UI.ann("翻过来看看", pr.grp.position.clone().add(v3(pr.PW / 2, .1, 0)));
   if (done < DR.prints.length) { tray.state = "ready"; UI.hint("点相纸，冲下一张"); }
   else { tray.state = "all"; UI.hint("都晾好了。点一张，看看背面"); UI.next("去照片墙 →", () => dispatchEvent(new CustomEvent("darkroom:wall"))); }
@@ -399,19 +513,32 @@ function trayCursor(e) {
   return "pointer";
 }
 
+const HINT_BY_STATE = { ready: "点相纸，冲下一张", all: "都晾好了。点一张，看看背面", developing: "等一等……", "await-lift": "用夹子把它夹起来" };
 async function openTray() {
-  if (!DR.prints.length) return;
+  ensurePrints(); if (!DR.prints.length) return;
   DR.scene2.fade(async () => {
-    buildTray(); if (sheet.mesh) sheet.mesh.visible = false;
+    buildTray(); leaveAll();
     tray.group.visible = true;
-    // start fresh if the selection changed
-    tray.prints.forEach((p) => scene.remove(p.grp)); tray.prints = []; tray.cur = -1; tray.anim = null;
-    DR.scene2.enterRoom("tray", VIEW_TRAY, { instant: true });
-    UI.show(true); UI.back(""); UI.next(""); DR.hud && DR.hud("SCENE 04 — 暗房", "04 / 05");
+    const key = JSON.stringify(DR.prints), same = tray.key === key && tray.level >= 1;
+    if (!same) {   // start fresh if the selection changed
+      tray.prints.forEach((p) => scene.remove(p.grp)); tray.prints = []; tray.cur = -1; tray.anim = null; tray.key = key;
+      tray.tongs.position.copy(TONGS_HOME); tray.tongs.rotation.set(0, .7, 0);
+      const P = tray.pourer; P.bottle.position.copy(P.home); P.bottle.rotation.z = 0; P.cap.position.copy(P.capHome); tray.stream.visible = tray.pool.visible = tray.froth.visible = false;
+      tray.drops.forEach((d) => tray.group.remove(d.m)); tray.drops = []; if (tray.level < 1) setLevel(REDUCED ? 1 : 0);
+    } else tray.prints.forEach((p) => (p.grp.visible = true));
+    DR.scene2.enterRoom("tray", VIEW_TRAY, { instant: true }); DR.scene2.lightUp(tray.light);
+    UI.show(true); DR.hud && DR.hud("SCENE 04 — 暗房");
     try { await document.fonts.load('64px "Darkroom Hand"'); } catch (e) { /* fallback font */ }
-    paperLabel(); UI.count(`0 / ${DR.prints.length} 晾好`);
-    tray.state = "ready"; UI.hint("点相纸开始");
-    UI.ann("相纸", PAPER_POS.clone().add(v3(.45, .15, -.4)));
+    paperLabel();
+    if (same) {
+      UI.hint(HINT_BY_STATE[tray.state] || "");
+      if (tray.state === "all") UI.next("去照片墙 →", () => dispatchEvent(new CustomEvent("darkroom:wall")));
+      if (tray.state === "await-lift") UI.ann("夹子", TONGS_HOME.clone().add(v3(.2, .2, 0)));
+      return;
+    }
+    const ready = () => { tray.state = "ready"; UI.hint("点相纸开始"); UI.ann("相纸", PAPER_POS.clone().add(v3(.45, .15, -.4))); };
+    if (tray.level >= 1) ready();
+    else { tray.state = "pouring"; UI.hint(""); setTimeout(() => { if (DR.scene2.room() === "tray" && tray.state === "pouring") pourIn(ready); }, 1900); }
   });
 }
 addEventListener("darkroom:tray", openTray);
@@ -420,7 +547,7 @@ addEventListener("darkroom:tray", openTray);
 canvas.addEventListener("pointerdown", (e) => { const r = DR.scene2.room(); if (r === "sheet") sheetDown(e); });
 canvas.addEventListener("pointermove", (e) => {
   const r = DR.scene2.room();
-  if (r === "sheet") sheetMove(e); else if (r === "tray") canvas.style.cursor = trayCursor(e);
+  if (r === "sheet") sheetMove(e); else if (r === "tray") { canvas.style.cursor = trayCursor(e); const o = trayHit(e); if (o !== tray.hover) { tray.hover = o; if (o && canvas.style.cursor === "pointer") sfx.hover(); } }
 });
 canvas.addEventListener("pointerup", (e) => { const r = DR.scene2.room(); if (r === "sheet") sheetUp(e); });
 canvas.addEventListener("pointercancel", () => { if (DR.scene2.room() === "sheet") sheetUp(); });
@@ -434,14 +561,11 @@ addEventListener("keydown", (e) => {
 });
 
 DR.scene4 = {
-  tray, sheet, feedPaper, liftPrint, viewPrint: (i) => tray.prints[i] && viewPrint(tray.prints[i]), hangBack,
+  tray, sheet, feedPaper, liftPrint, goDesk, leaveAll, ensurePrints, fill: () => { tray.anim = null; tray.stream.visible = tray.pool.visible = tray.froth.visible = false; tray.state = "ready"; setLevel(1); }, viewPrint: (i) => tray.prints[i] && viewPrint(tray.prints[i]), hangBack,
   select(list) { DR.prints = list.slice(0, MAX_PRINTS); sheet.mesh && sheetCount(); },
-  circle(roll, k) {   // debug: draw a circle around a frame as if by hand
+  circle(roll, k) {   // debug: circle a frame as if by hand
     const c = sheet.cells.find((x) => x.roll === roll && x.k === k); if (!c) return;
-    const pts = []; for (let a = 0; a <= 6.6; a += .25) pts.push({ x: c.x + c.w / 2 + Math.cos(a) * c.w * .72 * (1 + .05 * Math.sin(a * 3)), y: c.y + c.h / 2 + Math.sin(a) * c.h * .66 });
-    sheet.stroke = { pts: [pts[0]], t: performance.now() };
-    for (let i = 1; i < pts.length; i++) { sheet.stroke.pts.push(pts[i]); const n = sheet.stroke.pts.length; if (n >= 3) inkSegment(sheet.stroke.pts[n - 3], sheet.stroke.pts[n - 2], sheet.stroke.pts[n - 1]); }
-    sheetUp();
+    sheet.stroke = { pts: inkCircle(c), t: performance.now() }; sheetUp();
   },
 };
 

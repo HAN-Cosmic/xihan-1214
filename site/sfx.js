@@ -16,35 +16,63 @@ function ac() {
   if (ctx.state === "suspended") ctx.resume();
   return ctx;
 }
-// browsers only allow audio after a user gesture: the first tap (usually on the envelope) also starts the music
-function unlock() { ac(); music.play(); }
-for (const ev of ["pointerdown", "keydown", "touchstart"]) addEventListener(ev, unlock, { passive: true });
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode: just don't remember */ } },
+};
+const changed = () => dispatchEvent(new CustomEvent("darkroom:music"));
 
-/* background music: fades in, loops, pauses while the tab is hidden */
+/* background music: a playlist from content.md「背景音乐」. Fades in, moves on to the next song when one ends,
+   pauses while the tab is hidden. "off" is remembered between visits. */
 const music = {
-  el: null, gain: null, playing: false,
-  load(url) {
-    if (this.el || !url) return;
-    // nothing is downloaded until the first tap starts playback (7 MB on mobile data otherwise)
-    const el = new Audio(); el.preload = "none"; el.loop = true; el.src = url;
-    el.addEventListener("error", () => { this.el = null; this.playing = false; });
-    this.el = el;
+  el: null, gain: null, list: [], i: 0, playing: false, auto: false, off: store.get("dr-music") === "off",
+  setList(list) {
+    if (this.el || !list || !list.length) return;
+    this.list = list;
+    // nothing is downloaded until playback starts (7 MB per song on mobile data otherwise)
+    const el = new Audio(); el.preload = "none"; el.src = list[0].url; el.loop = list.length === 1;
+    el.addEventListener("ended", () => this.step(1, true));
+    el.addEventListener("error", () => { this.playing = false; changed(); });
+    this.el = el; changed();
   },
+  get title() { const t = this.list[this.i]; return t ? t.title : ""; },
   play() {
     const c = ac(); if (!c || !this.el || this.playing) return;
     if (!this.gain) {   // volume through Web Audio so the fade also works on iPhone
       this.gain = c.createGain(); this.gain.gain.value = 0;
       c.createMediaElementSource(this.el).connect(this.gain).connect(c.destination);
     }
-    this.playing = true;
-    this.el.play().then(() => this.gain.gain.setTargetAtTime(MUSIC_LEVEL, c.currentTime, 1.4)).catch(() => { this.playing = false; });
+    this.playing = true; this.auto = true;
+    if (this.off) { this.off = false; store.set("dr-music", "on"); }
+    this.gain.gain.cancelScheduledValues(c.currentTime); this.gain.gain.setValueAtTime(0, c.currentTime);
+    this.el.play().then(() => this.gain.gain.setTargetAtTime(MUSIC_LEVEL, c.currentTime, 1.2)).catch(() => { this.playing = false; changed(); });
+    changed();
   },
+  pause() { if (!this.el || !this.playing) return; this.playing = false; this.el.pause(); changed(); },
+  toggle() { if (this.playing) this.pause(); else this.play(); },
+  /* off: stop, rewind, and stay silent on the next visit too */
+  stop() {
+    if (!this.el) return; this.playing = false; this.el.pause(); try { this.el.currentTime = 0; } catch (e) { /* not loaded yet */ }
+    this.off = true; this.auto = true; store.set("dr-music", "off"); changed();
+  },
+  step(d, keep) {
+    const n = this.list.length; if (n < 2 || !this.el) return;
+    const go = keep || this.playing;
+    this.i = (this.i + d + n) % n; this.el.pause(); this.playing = false; this.el.src = this.list[this.i].url;
+    if (go) this.play(); else changed();
+  },
+  next() { this.step(1); }, prev() { this.step(-1); },
 };
-const loadMusic = () => { const c = window.DARKROOM && window.DARKROOM.content; if (c && c.music) music.load(c.music); };
+// browsers only allow audio after a user gesture: the first tap (usually on the envelope) also starts the music
+function unlock() { ac(); if (!music.auto && music.el) { music.auto = true; if (!music.off) music.play(); } }
+for (const ev of ["pointerdown", "keydown", "touchstart"]) addEventListener(ev, unlock, { passive: true });
+const loadMusic = () => { const c = window.DARKROOM && window.DARKROOM.content; if (c && c.playlist) music.setList(c.playlist); };
 addEventListener("darkroom:content", loadMusic); loadMusic();
+let resume = false;
 document.addEventListener("visibilitychange", () => {
-  if (!music.el || !music.playing) return;
-  if (document.hidden) music.el.pause(); else music.el.play().catch(() => {});
+  if (!music.el) return;
+  if (document.hidden) { resume = music.playing; if (resume) music.el.pause(); }
+  else if (resume && music.playing) music.el.play().catch(() => {});
 });
 
 function burst({ f = 4200, q = 1.2, dur = .012, gain = .3, type = "bandpass", at = 0, sweep = 0 }) {
@@ -114,6 +142,24 @@ export const sfx = {
   flip() { burst({ f: 3200, q: .5, dur: .2, gain: .07, type: "highpass", sweep: .4 }); },
   /* a pin pressed into the wall */
   pin() { burst({ f: 3000, q: 1.2, dur: .015, gain: .2 }); thump({ f0: 300, f1: 160, dur: .03, gain: .1 }); },
+  /* small things: a button, a hover */
+  ui() { burst({ f: 2600, q: 1.4, dur: .02, gain: .12 }); thump({ f0: 420, f1: 300, dur: .03, gain: .05 }); },
+  hover() { burst({ f: 3000, q: 2, dur: .012, gain: .05 }); },
+  /* going from one room to the next */
+  whoosh(d = .7) { swish({ f: 420, q: .6, dur: d, gain: .08, sweep: 2.4, type: "lowpass" }); },
+  /* a light switch: the click, then the lamp's little ping as it warms up */
+  lamp() {
+    burst({ f: 2800, q: 1.2, dur: .018, gain: .3 }); thump({ f0: 180, f1: 90, dur: .05, gain: .2 });
+    burst({ f: 1800, q: 1, dur: .02, gain: .1, at: .07 }); burst({ f: 5200, q: 6, dur: .09, gain: .03, at: .12 });
+  },
+  /* film wound quickly back into the canister */
+  rewind() { for (let i = 0; i < 9; i++) burst({ f: 3000 + i * 90, q: 1.2, dur: .012, gain: .2 * (1 - i / 11), at: i * .045 }); swish({ f: 1400, q: .5, dur: .45, gain: .03, sweep: 1.8 }); },
+  /* developer poured into the tray */
+  pour(d = 2.4) {
+    swish({ f: 650, q: .7, dur: d, gain: .11, sweep: 1.7 }); swish({ f: 2400, q: .5, dur: d, gain: .03, sweep: .8 });
+    for (let i = 0; i < d * 9; i++) burst({ f: 700 + Math.random() * 1500, q: 8, dur: .05, gain: .045, at: .15 + Math.random() * (d - .3), sweep: 1.5 });
+  },
+  drip() { burst({ f: 1300 + Math.random() * 900, q: 9, dur: .06, gain: .08, sweep: 1.6 }); },
   /* marker on paper: call scribble(speed) while drawing, scribbleStop() when the pen lifts */
   scribble(speed) {
     const c = ac(); if (!c) return;
@@ -132,4 +178,5 @@ export const sfx = {
   scribbleStop() { if (scrib && ctx) scrib.g.gain.setTargetAtTime(0, ctx.currentTime, .04); },
 };
 let scrib = null;
-window.DARKROOM = window.DARKROOM || {}; window.DARKROOM.sfx = sfx; window.DARKROOM.music = music;
+window.DARKROOM = window.DARKROOM || {}; window.DARKROOM.sfx = sfx; window.DARKROOM.music = music; window.DARKROOM.store = store;
+export { music, store };

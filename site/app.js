@@ -139,9 +139,9 @@ async function loadContent() {
       if (signIdx >= 0) { c.sign = lines[signIdx].replace(/^\s*——\s*/, "").trim() || c.sign; lines.splice(signIdx, 1); }
       c.letter = lines.join("\n").trim();
     }
-    // background music: first row of the「背景音乐」table with a file name; the file lives in content/music/
-    const mu = section(md, "背景音乐").match(/^\|[^|\n]*\|\s*([^|\n]*\.(?:mp3|m4a|aac|ogg|wav))\s*\|/im);
-    if (mu) c.music = "content/music/" + mu[1].trim().replace(/^content\/music\//, "");
+    // background music: every row of the「背景音乐」table with a file name, in order; the files live in content/music/
+    c.playlist = [...section(md, "背景音乐").matchAll(/^\|\s*([^|\n]*?)\s*\|\s*([^|\n]*\.(?:mp3|m4a|aac|ogg|wav))\s*\|/gim)]
+      .map((r) => ({ title: r[1].replace(/\s*[（(]\s*(.+?)\s*[）)]\s*$/, " · $1"), url: "content/music/" + r[2].trim().replace(/^content\/music\//, "") }));
     const end = codeBlock(section(md, "结尾的长信"));
     if (!unfilled(end)) {
       const lines = end.split("\n"); let sign = c.sign;
@@ -233,7 +233,7 @@ function toast(msg) {
   clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2400);
 }
 window.DARKROOM.toast = toast;
-window.DARKROOM.hud = (l, r) => { $("hudL").textContent = l; $("hudR").textContent = r; };
+window.DARKROOM.hud = (l) => { $("hudL").textContent = l; };
 $("next").addEventListener("click", () => {
   stage.classList.add("leave"); sfx("slide", .7);
   setTimeout(() => { window.DARKROOM.wantRolls = true; dispatchEvent(new CustomEvent("darkroom:rolls")); }, REDUCED ? 0 : 900);

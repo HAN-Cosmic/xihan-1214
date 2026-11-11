@@ -39,7 +39,7 @@ html, body { margin: 0; height: 100%; background: var(--black); color: var(--cre
 
 /* ---------- stage (fixed 16:10, scaled to fit) ---------- */
 .stage { position: fixed; left: 50%; top: 50%; width: calc(var(--u) * 100); height: calc(var(--u) * 62.5); transform: translate(-50%, -50%); }
-.hud { position: absolute; left: 0; right: 0; top: calc(var(--u) * 4); display: flex; justify-content: space-between; padding: 0 calc(var(--u) * 5);
+.hud { position: absolute; left: 0; right: 0; top: calc(var(--u) * 4); display: flex; justify-content: flex-end; padding: 0 calc(var(--u) * 5);
   font-family: var(--mono); font-size: calc(var(--u) * .82); letter-spacing: .22em; color: rgba(233, 220, 196, .55); opacity: 0; transition: opacity 1.4s ease 1.2s; }
 .ready .hud { opacity: 1; }
 .aside { position: absolute; left: calc(var(--u) * 5); top: calc(var(--u) * 10); margin: 0; font-size: calc(var(--u) * 1.2); line-height: 2.2; letter-spacing: .6em;
@@ -219,7 +219,6 @@ html, body { margin: 0; height: 100%; background: var(--black); color: var(--cre
 /* ---------- scenes 04–05: shared overlay ---------- */
 .room { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity .8s ease; }
 .room.on { opacity: 1; }
-.rm-count { position: absolute; right: calc(var(--u) * 4); top: calc(var(--u) * 3.6); font-family: var(--mono); font-size: max(calc(var(--u) * .8), 10px); letter-spacing: .24em; color: rgba(233, 220, 196, .6); }
 .rm-hint { position: absolute; left: 50%; bottom: calc(var(--u) * 3); transform: translateX(-50%); font-size: max(calc(var(--u) * 1.9), 16px); color: #d2525b; white-space: nowrap;
   opacity: 0; transition: opacity .5s; text-shadow: 0 2px 12px rgba(0, 0, 0, .7); }
 .rm-hint.show { opacity: .92; }
@@ -243,3 +242,66 @@ html, body { margin: 0; height: 100%; background: var(--black); color: var(--cre
 @media (prefers-reduced-motion: reduce) {
   .cap, .s2-ann, .room, .rm-hint, .rm-ann, .fader { transition: none !important; }
 }
+
+/* ---------- music player: a film reel in the corner that opens into a strip of leader ---------- */
+.player { position: fixed; left: max(14px, env(safe-area-inset-left)); top: 12px; z-index: 20; display: none; align-items: center; height: 34px; color: rgba(233, 220, 196, .72); }
+.player.has { display: flex; }
+.pl-reel { width: 34px; height: 34px; padding: 4px; border: 0; background: none; color: inherit; cursor: pointer; opacity: .62; transition: opacity .4s; flex: none; }
+.pl-reel:hover, .player.open .pl-reel { opacity: 1; }
+.pl-reel svg { width: 100%; height: 100%; display: block; animation: reel 6s linear infinite; animation-play-state: paused; }
+.player.playing .pl-reel svg { animation-play-state: running; }
+.pl-slash { opacity: 0; transition: opacity .3s; }
+.player.off .pl-slash { opacity: .9; }
+.player.off .pl-reel { opacity: .4; }
+@keyframes reel { to { transform: rotate(360deg); } }
+.pl-body { display: flex; align-items: center; gap: 2px; height: 30px; margin-left: 6px; padding: 0 8px 0 12px; max-width: 0; overflow: hidden; opacity: 0; pointer-events: none;
+  background-color: rgba(58, 31, 18, .86);
+  background-image: repeating-linear-gradient(90deg, rgba(233, 220, 196, .5) 0 5px, transparent 5px 12px), repeating-linear-gradient(90deg, rgba(233, 220, 196, .5) 0 5px, transparent 5px 12px);
+  background-size: 100% 3px, 100% 3px; background-position: 4px 3px, 4px calc(100% - 3px); background-repeat: no-repeat;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .45); transition: max-width .5s cubic-bezier(.3, .8, .3, 1), opacity .35s; }
+.player.open .pl-body { max-width: 420px; opacity: 1; pointer-events: auto; }
+.pl-title { font-family: var(--mono), var(--serif); font-size: 10px; letter-spacing: .14em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 210px; margin-right: 8px; color: rgba(240, 228, 206, .82); }
+.pl-body button { width: 30px; height: 30px; padding: 9px; border: 0; background: none; color: rgba(233, 220, 196, .78); cursor: pointer; flex: none; transition: color .2s, transform .2s; }
+.pl-body button:hover { color: #fff3dc; transform: scale(1.12); }
+.pl-body button:disabled { opacity: .28; cursor: default; transform: none; }
+.pl-body svg { width: 100%; height: 100%; display: block; }
+#plOff { color: #d2525b; }
+.i-pause { display: none; }
+.player.playing .i-pause { display: inline; }
+.player.playing .i-play { display: none; }
+.pl-reel:focus-visible, .pl-body button:focus-visible, .nav-item:focus-visible, .nav-toggle:focus-visible, .rm-alt:focus-visible { outline: 1px dashed rgba(233, 220, 196, .5); }
+
+/* ---------- index of rooms (after the first full visit), folded under the reel ---------- */
+.nav { position: fixed; left: max(14px, env(safe-area-inset-left)); top: 52px; z-index: 20; opacity: 0; pointer-events: none; transition: opacity 1.2s ease; }
+.nav.on { opacity: 1; pointer-events: auto; }
+.nav-toggle { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 0; background: none; cursor: pointer; color: rgba(233, 220, 196, .6);
+  font-family: var(--serif); font-size: 12px; letter-spacing: .3em; text-shadow: 0 1px 6px rgba(0, 0, 0, .9); transition: color .3s; }
+.nav-toggle b { font-weight: 400; font-size: 11px; transition: transform .35s; }
+.nav-toggle:hover, .nav.open .nav-toggle { color: rgba(245, 234, 214, .95); }
+.nav.open .nav-toggle b { transform: rotate(45deg); }
+.nav-list { display: flex; flex-direction: column; gap: 1px; margin-top: 6px; padding: 8px 6px; background: rgba(18, 10, 7, .82); box-shadow: 0 8px 26px rgba(0, 0, 0, .5);
+  border-left: 2px solid rgba(179, 36, 47, .7); opacity: 0; transform: translateY(-6px); pointer-events: none; transition: opacity .3s, transform .35s cubic-bezier(.3, .8, .3, 1); }
+.nav.open .nav-list { opacity: 1; transform: none; pointer-events: auto; }
+.nav-item { display: flex; align-items: baseline; gap: 10px; padding: 7px 14px 7px 8px; border: 0; background: none; cursor: pointer; text-align: left; color: rgba(233, 220, 196, .62);
+  font-family: var(--serif); font-size: 14px; letter-spacing: .2em; white-space: nowrap; transition: color .3s, transform .3s; }
+.nav-item i { font-family: var(--mono); font-style: normal; font-size: 10px; letter-spacing: .1em; opacity: .7; }
+.nav-item:hover { color: rgba(245, 234, 214, .98); transform: translateX(3px); }
+.nav-item.here { color: #d9666d; cursor: default; transform: none; }
+
+/* second button beside "back" (the contact sheet's "wipe and circle again") */
+.rm-alt { position: absolute; left: calc(var(--u) * 17); bottom: calc(var(--u) * 3.2); background: none; border: 0; padding: calc(var(--u) * .4); cursor: pointer; font-family: var(--mono);
+  font-size: max(calc(var(--u) * .8), 11px); letter-spacing: .24em; color: rgba(233, 220, 196, .8); opacity: 0; transition: opacity .5s; text-shadow: 0 1px 6px rgba(0, 0, 0, .95), 0 0 2px rgba(0, 0, 0, .9); }
+.room.on .rm-alt.show { opacity: .9; pointer-events: auto; }
+.rm-alt:hover { opacity: 1 !important; }
+
+/* arrows on the hand-written buttons lean forward a little */
+.s2-dark, .rm-next { transition: opacity .8s, letter-spacing .35s, transform .35s; }
+.s2-dark:hover, .rm-next:hover { letter-spacing: .08em; }
+.rm-back:hover, .s2-back:hover { transform: translateX(-3px); }
+.rm-back, .s2-back { transition: opacity .5s, transform .3s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pl-reel svg { animation: none; }
+  .pl-body, .nav, .nav-item, .nav-list { transition: none !important; }
+}
+@media (max-height: 500px) { .pl-title { max-width: 120px; } }

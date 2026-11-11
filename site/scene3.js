@@ -164,24 +164,48 @@ function hoverCursor(e) {
   if (cellAt(e) >= 0 || (mode.kind === 1 && onCanister(e))) return "pointer";
   return mode.draggable ? "grab" : "default";
 }
+let canTap = 0, canTimer = 0;
+const DOUBLE = 320;   // ms between the two taps of a double-tap on the canister
 function tap(e) {
+  // double-tap the canister: wind everything back and put the roll down
+  if (onCanister(e) && cellAt(e) < 0) {
+    const now = e.timeStamp;   // when the tap happened, not when we got round to handling it
+    if (now - canTap < DOUBLE) { canTap = 0; clearTimeout(canTimer); DR.scene2.unpick(); return; }
+    canTap = now;
+    if (mode.kind === 1 && !mode.held) {   // a single tap pulls a random frame, once we know it isn't a double-tap
+      const m = mode; clearTimeout(canTimer);
+      canTimer = setTimeout(() => { if (mode === m && !m.held) holdUp(randomFrame()); }, DOUBLE - 60);
+      return;
+    }
+  }
   if (mode.kind === 2) { if (pick(e, [mode.lever, mode.body])) press(); return; }
   if (mode.held) { putBack(); return; }
   const k = cellAt(e);
-  if (k < 0) { if (mode.kind === 1 && onCanister(e)) holdUp(randomFrame()); return; }
+  if (k < 0) return;
   if (mode.kind === 0) develop(k); else holdUp(k);
 }
+// the browser's own double-click as well (it knows the system's double-click speed)
+canvas.addEventListener("dblclick", (e) => {
+  if (!mode || !onCanister(e) || cellAt(e) >= 0) return;
+  canTap = 0; clearTimeout(canTimer); DR.scene2.unpick();
+});
 function onCanister(e) { return !!pick(e, [S.rollMeshes[mode.roll.i]]); }
-function randomFrame() {   // any frame but the one we just looked at
-  const n = mode.roll.frames.length; let k = Math.floor(Math.random() * n);
-  if (n > 1 && k === mode.lastHeld) k = (k + 1 + Math.floor(Math.random() * (n - 1))) % n;
-  return k;
+/* shuffled deck: every frame comes up once before any repeats, and never the same one twice in a row */
+function randomFrame() {
+  const n = mode.roll.frames.length;
+  if (!mode.bag || !mode.bag.length) {
+    const b = [...Array(n).keys()];
+    for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; }
+    if (n > 1 && b[n - 1] === mode.lastHeld) [b[0], b[n - 1]] = [b[n - 1], b[0]];
+    mode.bag = b;
+  }
+  return mode.bag.pop();
 }
 
 /* ---------- 2024: develop in place ---------- */
 function develop(k) {
   const c = mode.strip.cells[k];
-  if (c.devTarget < 1) { c.devTarget = 1; sfx.lift(); }
+  if (c.devTarget < 1) { c.devTarget = 1; sfx.lift(); } else sfx.tick(.4);
   frameCaption(mode.roll, k);
 }
 
@@ -206,6 +230,7 @@ function holdUp(k) {
   const glow = new THREE.Mesh(new THREE.PlaneGeometry(5.5, 5.5), new THREE.MeshBasicMaterial({ map: glowTexture(), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
   glow.position.set(HOLD.x + .1, HOLD.y + .15, HOLD.z - 1.2); scene.add(glow);
   cell.photo.visible = false;
+  if (mode.bag) { const bi = mode.bag.indexOf(k); if (bi >= 0) mode.bag.splice(bi, 1); }   // picked by hand: don't deal it again this round
   mode.held = { k, card, mat, glow, t: 0, dir: 1, from: mode.strip.cellWorld(k) }; mode.lastHeld = k;
   sfx.lift(); frameCaption(roll, k);
 }
@@ -316,7 +341,7 @@ function open(d) {
   caption(`ROLL 0${d.i + 1}　·　${d.year}　·　${d.name}`, "");
 }
 function close(now) {
-  if (!mode) return; const m = mode; mode = null; drag.on = false;
+  if (!mode) return; const m = mode; mode = null; drag.on = false; clearTimeout(canTimer);
   cap.classList.remove("show"); ann.classList.remove("show"); hint.textContent = "挑一卷"; canvas.style.cursor = "default";
   if (m.held) { scene.remove(m.held.card, m.held.glow); }
   m.strip.silent = false; m.strip.rate = 9; m.strip.Lt = 0;           // the film winds back in

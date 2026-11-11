@@ -24,7 +24,6 @@
 <main class="stage" id="stage">
   <header class="hud">
     <span class="hud-l" id="hudL">SCENE 01 — 信封</span>
-    <span class="hud-r" id="hudR">01 / 05</span>
   </header>
 
   <p class="aside" id="aside">有些东西<br>需要时间<br>慢慢显影</p>
@@ -68,17 +67,28 @@
   <div class="s2-ann hand" id="s2Ann" aria-hidden="true"><svg viewBox="0 0 60 40" aria-hidden="true"><path d="M4 34 C 14 10, 34 4, 56 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M4 34 l 2 -9 M4 34 l 8 -3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>按我</span></div>
   <div class="s2-note hand" id="s2Note"></div>
   <div class="s2-hint hand" id="s2Hint">挑一卷</div>
-  <button class="s2-back" id="s2Back">← 放回桌上</button>
+  <button class="s2-back" id="s2Back">← 放回桌上（双击胶卷也行）</button>
   <button class="s2-dark hand" id="s2Dark">去暗房 →</button>
 </section>
 <section class="room" id="room" aria-hidden="true">
-  <div class="rm-count" id="rmCount"></div>
   <div class="rm-hint hand" id="rmHint"></div>
   <div class="rm-ann hand" id="rmAnn" aria-hidden="true"><svg viewBox="0 0 60 40" aria-hidden="true"><path d="M4 34 C 14 10, 34 4, 56 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M4 34 l 2 -9 M4 34 l 8 -3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span id="rmAnnText"></span></div>
   <button class="rm-back" id="rmBack"></button>
+  <button class="rm-alt" id="rmAlt"></button>
   <button class="rm-next hand" id="rmNext"></button>
   <div class="rm-clocks" id="rmClocks" aria-label="上饶和墨尔本的时间"></div>
 </section>
+<nav class="nav" id="nav" aria-label="目录"></nav>
+<div class="player" id="player" aria-label="背景音乐">
+  <button class="pl-reel" id="plReel" aria-label="音乐播放器" aria-expanded="false"><svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="20" cy="20" r="3" fill="currentColor"/><g fill="currentColor" opacity=".8"><circle cx="20" cy="9" r="3.6"/><circle cx="29.5" cy="25.5" r="3.6"/><circle cx="10.5" cy="25.5" r="3.6"/></g><path class="pl-slash" d="M7 33 L33 7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+  <div class="pl-body" id="plBody">
+    <span class="pl-title" id="plTitle"></span>
+    <button id="plPrev" aria-label="上一首"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M19 5l-10 7 10 7z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg></button>
+    <button id="plPlay" aria-label="播放"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="i-play" d="M7 4l13 8-13 8z" fill="currentColor"/><path class="i-pause" d="M7 5v14M17 5v14" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/></svg></button>
+    <button id="plNext" aria-label="下一首"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M5 5l10 7-10 7z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg></button>
+    <button id="plOff" aria-label="关闭音乐"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button>
+  </div>
+</div>
 <div class="fader" id="fader" aria-hidden="true"></div>
 <div class="grain" aria-hidden="true"><canvas id="grain"></canvas></div>
 <div class="vignette" aria-hidden="true"></div>
@@ -91,5 +101,6 @@
 <script type="module" src="scene3.js"></script>
 <script type="module" src="scene4.js"></script>
 <script type="module" src="scene5.js"></script>
+<script type="module" src="ui.js"></script>
 </body>
 </html>

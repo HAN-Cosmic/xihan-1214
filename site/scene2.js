@@ -4,6 +4,8 @@ import "./sfx.js";
 const $ = (id) => document.getElementById(id);
 const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const DR = (window.DARKROOM = window.DARKROOM || {});
+// once she has reached the photo wall, every room stays open (see ui.js for the index)
+DR.unlocked = !!(DR.store && DR.store.get("dr-unlocked") === "1");
 
 /* ---------- roll definitions ---------- */
 const ROLLS = [
@@ -230,7 +232,7 @@ canvas.addEventListener("pointermove", (e) => {
   if (pen !== penHover) { penHover = pen; if (pen && pen.t > .95) { pen.wob = 1; DR.sfx && DR.sfx.tick(.35); } }
   if (picked >= 0 || room) return;   // a picked roll is driven by scene3.js
   const i = hit(e); if (i === hovered) return;
-  hovered = i; canvas.style.cursor = i >= 0 ? "pointer" : "default";
+  hovered = i; canvas.style.cursor = i >= 0 ? "pointer" : "default"; if (i >= 0 && DR.sfx) DR.sfx.hover();
   const el = $("s2Hover");
   if (i >= 0) { const r = ROLLS[i]; el.textContent = r.sealed ? r.name : `${r.year}　${r.name}`; el.classList.add("show"); } else el.classList.remove("show");
 });
@@ -251,16 +253,16 @@ function pick(i) {
   camTarget.pos.copy(CAM_TABLE.pos); camTarget.look.copy(CAM_TABLE.look);
   s2.classList.add("picked"); DR.sfx && DR.sfx.pick();
   const r = ROLLS[i];
-  DR.hud && DR.hud(`SCENE 03 — ${r.name}`, "03 / 05");
+  DR.hud && DR.hud(`SCENE 03 — ${r.name}`);
   s2.classList.add("viewed");   // after the first roll, the way to the darkroom shows up
   dispatchEvent(new CustomEvent("darkroom:roll-open", { detail: { i, year: r.year, name: r.name, iso: r.iso } }));
 }
 function unpick() {
   if (picked < 0) return;
   dispatchEvent(new CustomEvent("darkroom:roll-close", { detail: { i: picked } }));
-  picked = -1; s2.classList.remove("picked"); DR.sfx && DR.sfx.drop();
+  picked = -1; s2.classList.remove("picked"); DR.sfx && (DR.sfx.drop(), REDUCED || DR.sfx.rewind());
   camTarget.pos.copy(CAM_HOME.pos); camTarget.look.copy(CAM_HOME.look);
-  DR.hud && DR.hud("SCENE 02 — 胶卷", "02 / 05");
+  DR.hud && DR.hud("SCENE 02 — 胶卷");
 }
 $("s2Back").addEventListener("click", unpick);
 addEventListener("keydown", (e) => { if (e.key === "Escape" && active && picked >= 0 && !room && !(DR.scene3 && DR.scene3.busyEscape())) unpick(); });
@@ -268,19 +270,75 @@ $("s2Dark").addEventListener("click", () => dispatchEvent(new CustomEvent("darkr
 
 /* later scenes take over the camera; the rolls slide away and the desk overlay hides */
 const fader = $("fader");
+let fading = false;
 function fade(fn) {
   if (REDUCED) { fn(); return; }
-  fader.classList.add("on"); setTimeout(() => { Promise.resolve(fn()).then(() => setTimeout(() => fader.classList.remove("on"), 120)); }, 480);
+  if (fading) return; fading = true; DR.sfx && DR.sfx.whoosh();
+  fader.classList.add("on");
+  setTimeout(() => { new Promise((res) => res(fn())).catch((e) => console.error(e)).then(() => setTimeout(() => { fader.classList.remove("on"); fading = false; }, 160)); }, 480);
 }
 function enterRoom(name, view, { instant = false } = {}) {
   if (picked >= 0) unpick();
   room = name; hovered = -1; $("s2Hover").classList.remove("show"); canvas.style.cursor = "default";
   s2.classList.toggle("room", !!name);
   camTarget.pos.copy(view ? view.pos : CAM_HOME.pos); camTarget.look.copy(view ? view.look : CAM_HOME.look);
-  if (instant) { camera.position.copy(camTarget.pos); camLook.copy(camTarget.look); }
+  if (instant) {   // arrive a step back and a little high, then settle in: a short push-in instead of a hard cut
+    camera.position.copy(camTarget.pos); camLook.copy(camTarget.look);
+    if (!REDUCED) camera.position.add(tmpV.copy(camTarget.pos).sub(camTarget.look).normalize().multiplyScalar(1.1)).y += .25;
+  }
+  if (!name) lightUp((v) => { deskLight = v; });
+  dispatchEvent(new CustomEvent("darkroom:room", { detail: { room: name } }));
 }
 
+/* a lamp being switched on: click, a flicker, then it warms up to full. set(v) gets 0…1 */
+const lamps = [];
+let deskLight = 1;
+function lightUp(set, { delay = .55, d = 1.1 } = {}) {
+  if (REDUCED) { set(1); return; }
+  set(0); lamps.push({ set, t: -delay, d, on: false });
+}
+function runLamps(dt) {
+  for (let i = lamps.length - 1; i >= 0; i--) {
+    const L = lamps[i]; L.t += dt; if (L.t < 0) continue;
+    if (!L.on) { L.on = true; DR.sfx && DR.sfx.lamp(); }
+    const x = L.t / L.d;
+    L.set(x >= 1 ? 1 : x < .07 ? .55 : x < .13 ? .12 : x < .2 ? .7 : x < .26 ? .35 : .35 + .65 * (1 - Math.pow(1 - (x - .26) / .74, 3)));
+    if (x >= 1) lamps.splice(i, 1);
+  }
+}
+
+/* dust drifting through the lamp light */
+const moteSets = [];
+function motes(parent, center, size, color = "#ffd9a8", n = TOUCH ? 50 : 110) {
+  if (REDUCED) return null;
+  const c = document.createElement("canvas"); c.width = c.height = 32; const g = c.getContext("2d");
+  const gr = g.createRadialGradient(16, 16, 0, 16, 16, 16); gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(.4, "rgba(255,255,255,.35)"); gr.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = gr; g.fillRect(0, 0, 32, 32);
+  const pos = new Float32Array(n * 3), seed = new Float32Array(n * 3);
+  for (let i = 0; i < n * 3; i++) { seed[i] = Math.random(); pos[i] = (seed[i] - .5) * size.getComponent(i % 3); }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  const pts = new THREE.Points(geo, new THREE.PointsMaterial({ map: new THREE.CanvasTexture(c), color, size: .045, transparent: true, opacity: .32, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true }));
+  pts.position.copy(center); pts.frustumCulled = false; parent.add(pts);
+  moteSets.push({ pts, seed, size, n }); return pts;
+}
+function runMotes(t) {
+  for (const m of moteSets) {
+    if (!m.pts.visible || (m.pts.parent && !m.pts.parent.visible)) continue;
+    const a = m.pts.geometry.attributes.position.array, s = m.seed;
+    for (let i = 0; i < m.n; i++) {
+      const j = i * 3, ph = s[j] * 40;
+      a[j] = (s[j] - .5) * m.size.x + Math.sin(t * .13 + ph) * .35;
+      a[j + 1] = ((s[j + 1] + t * (.006 + s[j + 2] * .012)) % 1 - .5) * m.size.y;
+      a[j + 2] = (s[j + 2] - .5) * m.size.z + Math.cos(t * .1 + ph) * .3;
+    }
+    m.pts.geometry.attributes.position.needsUpdate = true;
+  }
+}
+motes(scene, new THREE.Vector3(.4, 2.4, 1), new THREE.Vector3(9, 4.6, 7));
+
 /* ---------- animation ---------- */
+const par = { x: 0, y: 0 }, parT = { x: 0, y: 0 }, parV = new THREE.Vector3();
+addEventListener("pointermove", (e) => { parT.x = (e.clientX / innerWidth - .5) * 2; parT.y = -(e.clientY / innerHeight - .5) * 2; }, { passive: true });
 const tmpQ = new THREE.Quaternion(), tmpE = new THREE.Euler(), tmpV = new THREE.Vector3();
 const hooks = [];   // per-frame callbacks from scene3.js: fn(dt, k, t)
 let last = performance.now(), t0 = 0;
@@ -311,8 +369,15 @@ function frame(now) {
     p.wob = Math.max(0, p.wob - dt * 1.4);
     if (!REDUCED && p.t >= 1) { tmpE.set(Math.sin(t0 * 1.7 + p.ph) * (.012 + p.wob * .09), 0, Math.sin(t0 * 1.1 + p.ph) * (.014 + p.wob * .12)); tmpQ.setFromEuler(tmpE); p.g.quaternion.multiply(tmpQ); }
   }
-  camera.position.lerp(camTarget.pos, k * .6); camLook.lerp(camTarget.look, k * .6); camera.lookAt(camLook);
-  spot.intensity += ((picked >= 0 ? 230 : 260) - spot.intensity) * k;
+  // a little parallax with the pointer, as if leaning in over the desk (not while drawing on the contact sheet)
+  const pk = REDUCED || TOUCH || room === "sheet" ? 0 : 1;
+  par.x += (parT.x * pk - par.x) * Math.min(1, dt * 2.5); par.y += (parT.y * pk - par.y) * Math.min(1, dt * 2.5);
+  camera.position.sub(parV);
+  camera.position.lerp(camTarget.pos, k * .6); camLook.lerp(camTarget.look, k * .6);
+  parV.set(par.x * .22, par.y * .12, 0).applyQuaternion(camera.quaternion); camera.position.add(parV);
+  camera.lookAt(camLook);
+  runLamps(dt); runMotes(t0);
+  spot.intensity = (picked >= 0 ? 230 : 260) * deskLight * (REDUCED ? 1 : 1 + Math.sin(t0 * .9) * .012);
   for (const f of hooks) f(dt, k, t0);
   renderer.render(scene, camera);
   if (active) requestAnimationFrame(frame);
@@ -321,7 +386,10 @@ function frame(now) {
 function start() {
   if (active) return; active = true; applyContent();
   canvas.classList.add("on"); s2.classList.add("on"); s2.setAttribute("aria-hidden", "false");
-  DR.hud && DR.hud("SCENE 02 — 胶卷", "02 / 05");
+  if (DR.unlocked) s2.classList.add("viewed");
+  lightUp((v) => { deskLight = v; }, { delay: .7 });
+  dispatchEvent(new CustomEvent("darkroom:room", { detail: { room: null } }));
+  DR.hud && DR.hud("SCENE 02 — 胶卷");
   // camera eases down from a higher angle on entry
   camera.position.set(0, 12, 4.5); camLook.copy(CAM_HOME.look); camera.lookAt(camLook);
   last = performance.now(); requestAnimationFrame(frame);
@@ -330,7 +398,7 @@ addEventListener("darkroom:rolls", start);
 if (DR.wantRolls) start();
 renderer.localClippingEnabled = true;
 DR.scene2 = {
-  pick, unpick, sealedNote, rolls: ROLLS, enterRoom, fade, room: () => room, deskTex,
+  pick, unpick, sealedNote, rolls: ROLLS, enterRoom, fade, lightUp, motes, room: () => room, active: () => active, deskTex,
   three: { THREE, scene, camera, canvas, renderer, spot, rollMeshes: rolls, R, LEN, STAND, ray: setPtr },
   hooks, picked: () => picked,
 };

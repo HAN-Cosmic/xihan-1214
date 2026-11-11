@@ -60,8 +60,10 @@ async function build() {
   lamp.position.set(X0 + 1.5, 9.5, 5.5); lamp.target.position.set(X0, 3.4, WALL_Z);
   lamp.castShadow = true; lamp.shadow.mapSize.set(matchMedia("(pointer: coarse)").matches ? 512 : 1024, matchMedia("(pointer: coarse)").matches ? 512 : 1024); lamp.shadow.radius = 5; lamp.shadow.bias = -.0005;
   g.add(lamp, lamp.target);
+  wall.light = (v) => { lamp.intensity = 340 * v; };
+  DR.scene2.motes(g, new THREE.Vector3(X0, 3.6, 4), new THREE.Vector3(12, 6, 8));
 
-  const rolls = DR.content.rolls, names = DR.scene2.rolls, chosen = DR.prints || [];
+  const rolls = DR.content.rolls, names = DR.scene2.rolls;
   const imgs = await Promise.all(rolls.map((r) => Promise.all(r.frames.map((f) => loadImg("assets/photos/thumbs/" + f.file)))));
   try { await document.fonts.load('64px "Darkroom Hand"'); } catch (e) { /* fallback */ }
   const ring = ringCanvas(), rr = rnd(42);
@@ -79,11 +81,10 @@ async function build() {
       photo.castShadow = true; photo.position.y = -h / 2 + .06; it.add(photo);
       it.rotation.z = (rr() - .5) * .12;
       const pn = pin(0, 0); it.add(pn);
-      if (chosen.some((c) => c.roll === ri && c.k === k)) {
-        const rg = new THREE.Mesh(new THREE.PlaneGeometry(w * 1.45, h * 1.3), new THREE.MeshBasicMaterial({ map: ring, transparent: true, depthWrite: false }));
-        rg.position.set(0, photo.position.y, .03); it.add(rg);
-      }
-      it.userData = { roll: ri, k, home: it.position.clone(), homeR: it.rotation.z, delay: (ri * 12 + k) * .045, photo, pin: pn, cy: photo.position.y };
+      // red marker ring, shown on the frames she circled on the contact sheet (see markChosen)
+      const rg = new THREE.Mesh(new THREE.PlaneGeometry(w * 1.45, h * 1.3), new THREE.MeshBasicMaterial({ map: ring, transparent: true, depthWrite: false }));
+      rg.position.set(0, photo.position.y, .03); rg.visible = false; it.add(rg);
+      it.userData = { roll: ri, k, home: it.position.clone(), homeR: it.rotation.z, delay: (ri * 12 + k) * .045, photo, pin: pn, ring: rg, cy: photo.position.y };
       it.scale.setScalar(REDUCED ? 1 : .001);
       g.add(it); wall.items.push(it); pins.push(new THREE.Vector3(x, y, WALL_Z + .06));
     });
@@ -106,6 +107,18 @@ async function build() {
   wall.veil.position.set(X0, 4, 3.2); wall.veil.visible = false; g.add(wall.veil);
 }
 
+function markChosen() {
+  const chosen = DR.prints || [];
+  for (const it of wall.items) if (it.userData.ring) it.userData.ring.visible = chosen.some((c) => c.roll === it.userData.roll && c.k === it.userData.k);
+}
+/* leaving for another room: put a held photo straight back, hide the wall */
+function hide() {
+  if (!wall.group) return;
+  const it = wall.zoom;
+  if (it) { const u = it.userData; it.position.copy(u.home); it.scale.setScalar(1); it.rotation.z = u.homeR; u.photo.material.emissiveIntensity = 0; u.pin.visible = true; wall.veil.visible = false; wall.veil.material.opacity = 0; wall.zoom = null; anim = null; }
+  wall.group.visible = false;
+}
+
 /* ---------- entrance, zoom, letter ---------- */
 let anim = null;
 function run(d, fn, done) { anim = { t: 0, d: REDUCED ? .001 : d, fn, done }; }
@@ -115,7 +128,10 @@ DR.scene2.hooks.push((dt) => {
   for (const it of wall.items) {   // pin everything up one by one
     const d = it.userData.delay; if (d === undefined || it.userData.up) continue;
     if (REDUCED || wall.t > d) {
-      if (it.isGroup) { const e = ease((wall.t - d) / .35); it.scale.setScalar(REDUCED ? 1 : Math.max(.001, e)); if (e >= 1 || REDUCED) { it.userData.up = true; if (!REDUCED && it.userData.k % 3 === 0) sfx.pin(); } }
+      if (it.isGroup) {
+        const x = Math.min(1, (wall.t - d) / .42), e = ease(x), o = REDUCED ? 1 : 1 + 2.4 * Math.pow(x - 1, 3) + 1.4 * Math.pow(x - 1, 2);   // lands with a small overshoot
+        it.scale.setScalar(REDUCED ? 1 : Math.max(.001, o)); it.position.z = it.userData.home.z + (REDUCED ? 0 : (1 - e) * .5); if (e >= 1 || REDUCED) { it.userData.up = true; it.position.z = it.userData.home.z; if (!REDUCED && it.userData.k % 2 === 0) sfx.pin(); }
+      }
       else { it.visible = true; it.userData.up = true; }
     }
   }
@@ -143,7 +159,7 @@ function zoomOut() {
 }
 function readLetter() {
   const e = DR.content.ending; if (!e) { DR.toast && DR.toast("信还没写好"); return; }
-  sfx.paper(); DR.openReader(e.text, e.sign); wall.read = true; DR.room.hint("三周年快乐");
+  sfx.paper(); DR.openReader(e.text, e.sign); wall.read = true; if (DR.scene2.room() === "wall") DR.room.hint("三周年快乐");
 }
 function hitItem(e) {
   const h = S.ray(e).intersectObjects([...wall.items.filter((i) => i.isGroup), wall.letter], true)[0]; if (!h) return null;
@@ -155,7 +171,12 @@ canvas.addEventListener("click", (e) => {
   const o = hitItem(e); if (!o) return;
   if (o.userData.letter) readLetter(); else zoomIn(o);
 });
-canvas.addEventListener("pointermove", (e) => { if (DR.scene2.room() === "wall") canvas.style.cursor = wall.zoom || hitItem(e) ? "pointer" : "default"; });
+let wallHover = null;
+canvas.addEventListener("pointermove", (e) => {
+  if (DR.scene2.room() !== "wall") return;
+  const o = wall.zoom ? null : hitItem(e); canvas.style.cursor = wall.zoom || o ? "pointer" : "default";
+  if (o !== wallHover) { wallHover = o; if (o) sfx.hover(); }
+});
 addEventListener("keydown", (e) => { if (DR.scene2.room() === "wall" && e.key === "Escape" && wall.zoom && !$("reader").classList.contains("on")) zoomOut(); });
 
 /* Shangrao and Melbourne, side by side */
@@ -172,16 +193,20 @@ function replay() {
   setTimeout(() => { if (location.hash) location.replace(location.pathname + location.search); else location.reload(); }, REDUCED ? 0 : 600);
 }
 async function openWall() {
+  DR.scene4 && DR.scene4.ensurePrints();
   DR.scene2.fade(async () => {
     await build();
-    if (DR.scene4 && DR.scene4.tray.group) DR.scene4.tray.group.visible = false;
-    DR.scene4 && DR.scene4.tray.prints.forEach((p) => (p.grp.visible = false));
-    DR.scene2.enterRoom("wall", VIEW, { instant: true });
-    const R = DR.room; R.show(true); R.back(""); R.next(""); R.ann(""); R.count("");
+    DR.scene4 && DR.scene4.leaveAll();
+    wall.group.visible = true; markChosen();
+    DR.scene2.enterRoom("wall", VIEW, { instant: true }); DR.scene2.lightUp(wall.light);
+    if (!wall.seen) { wall.seen = true; wall.t = -1.2; }   // the first time: wait for the lamp, then pin them up
+    const R = DR.room; R.show(true);
     $("room").classList.add("wall"); lastClock = 0; updateClocks();
-    R.hint("点一张照片看看。最后，读那封信");
+    R.hint(wall.read ? "三周年快乐" : "点一张照片看看。最后，读那封信");
     R.next("重新看一遍 ↺", replay);
-    DR.hud && DR.hud("SCENE 05 — 照片墙", "05 / 05");
+    DR.hud && DR.hud("SCENE 05 — 照片墙");
+    // she has seen it all once: from now on every room is open (ui.js shows the index)
+    if (!DR.unlocked) { DR.unlocked = true; DR.store && DR.store.set("dr-unlocked", "1"); dispatchEvent(new CustomEvent("darkroom:unlocked")); }
   });
 }
 addEventListener("darkroom:wall", openWall);
@@ -190,4 +215,4 @@ if (location.hash === "#wall") {
   const go = () => setTimeout(() => { DR.prints = [{ roll: 0, k: 0 }, { roll: 1, k: 3 }, { roll: 2, k: 7 }]; openWall(); }, 400);
   if (DR.content) go(); else addEventListener("darkroom:content", go, { once: true });
 }
-DR.scene5 = { zoom: (i) => zoomIn(wall.items.filter((x) => x.isGroup)[i]), zoomOut, readLetter };
+DR.scene5 = { zoom: (i) => zoomIn(wall.items.filter((x) => x.isGroup)[i]), zoomOut, readLetter, hide };
