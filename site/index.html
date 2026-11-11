@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>暗房 · 给曦酱</title>
+<meta name="description" content="三卷胶卷，一年一卷。">
+<meta name="theme-color" content="#17130f">
+<meta property="og:type" content="website">
+<meta property="og:title" content="暗房 · 给曦酱">
+<meta property="og:description" content="三卷胶卷，一年一卷。">
+<meta property="og:url" content="https://han-cosmic.github.io/xihan-1214/">
+<meta property="og:image" content="https://han-cosmic.github.io/xihan-1214/assets/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='29' fill='%236b1d2a'/%3E%3Ccircle cx='32' cy='32' r='22' fill='none' stroke='%23e9dcc4' stroke-opacity='.35' stroke-width='2'/%3E%3Ctext x='32' y='42' font-size='28' text-anchor='middle' fill='%23e9dcc4' font-family='serif'%3E曦%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="desk" id="desk"></div>
+<div class="lamp" aria-hidden="true"></div>
+
+<main class="stage" id="stage">
+  <header class="hud">
+    <span class="hud-l" id="hudL">SCENE 01 — 信封</span>
+    <span class="hud-r" id="hudR">01 / 05</span>
+  </header>
+
+  <p class="aside" id="aside">有些东西<br>需要时间<br>慢慢显影</p>
+
+  <div class="ticket" id="ticket" aria-hidden="true">
+    <div class="ticket-in">
+      <div class="t-head"><span class="t-brand">暗房</span><span class="t-no">No.1214</span></div>
+      <div class="t-row"><span class="t-k">收件人</span><span class="t-v hand" id="tName">王妍曦</span></div>
+      <div class="t-row"><span class="t-k">寄出</span><span class="t-v hand" id="tFrom">上饶</span><span class="t-k">日期</span><span class="t-v hand" id="tDate">12.14</span></div>
+      <div class="t-row"><span class="t-k">胶卷</span><span class="t-v">35mm · 3 + 1 卷</span></div>
+      <div class="t-checks"><span><i class="ck on"></i>显影</span><span><i class="ck on"></i>放大</span><span><i class="ck"></i>上光</span></div>
+      <div class="t-note hand" id="tNote">别弄丢了</div>
+      <div class="stamp">已冲洗<small>PROCESSED · 2026</small></div>
+    </div>
+  </div>
+
+  <div class="env" id="env" role="button" tabindex="0" aria-label="打开信封">
+    <div class="env-back"></div>
+    <article class="letter" id="letter" aria-live="polite">
+      <div class="half top"><div class="sheet"><div class="paper-body" id="paperTop"></div></div></div>
+      <div class="half bot"><div class="sheet"><div class="paper-body" id="paperBot"></div></div><div class="back"></div></div>
+    </article>
+    <div class="env-front">
+      <div class="addr hand" id="addr">王妍曦　收</div>
+      <div class="postmark"><span>SHANGRAO</span><b>2026.12.14</b><span>MELBOURNE</span></div>
+      <div class="stampbox"><div class="pstamp"><span>7900</span><small>KM</small></div></div>
+    </div>
+    <div class="flap"><div class="flap-face"></div><div class="seal">曦</div></div>
+  </div>
+
+  <div class="hint hand" id="hint">点开它</div>
+  <button class="next hand hidden" id="next">去看看胶卷 →</button>
+  <div class="toast" id="toast">第二幕还在冲洗中</div>
+</main>
+
+<canvas id="gl" class="gl" aria-label="桌上的四卷胶卷"></canvas>
+<section class="s2" id="s2" aria-hidden="true">
+  <div class="s2-title"><h2 id="s2Title">三卷胶卷，一个我们</h2><p id="s2Sub">每一年都卷好了，等你来冲洗</p></div>
+  <div class="s2-hover" id="s2Hover"></div>
+  <div class="cap" id="cap" aria-live="polite"><div class="cap-meta" id="capMeta"></div><div class="cap-line" id="capLine"></div></div>
+  <div class="s2-ann hand" id="s2Ann" aria-hidden="true"><svg viewBox="0 0 60 40" aria-hidden="true"><path d="M4 34 C 14 10, 34 4, 56 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M4 34 l 2 -9 M4 34 l 8 -3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>按我</span></div>
+  <div class="s2-note hand" id="s2Note"></div>
+  <div class="s2-hint hand" id="s2Hint">挑一卷</div>
+  <button class="s2-back" id="s2Back">← 放回桌上</button>
+  <button class="s2-dark hand" id="s2Dark">去暗房 →</button>
+</section>
+<section class="room" id="room" aria-hidden="true">
+  <div class="rm-count" id="rmCount"></div>
+  <div class="rm-hint hand" id="rmHint"></div>
+  <div class="rm-ann hand" id="rmAnn" aria-hidden="true"><svg viewBox="0 0 60 40" aria-hidden="true"><path d="M4 34 C 14 10, 34 4, 56 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M4 34 l 2 -9 M4 34 l 8 -3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span id="rmAnnText"></span></div>
+  <button class="rm-back" id="rmBack"></button>
+  <button class="rm-next hand" id="rmNext"></button>
+  <div class="rm-clocks" id="rmClocks" aria-label="上饶和墨尔本的时间"></div>
+</section>
+<div class="fader" id="fader" aria-hidden="true"></div>
+<div class="grain" aria-hidden="true"><canvas id="grain"></canvas></div>
+<div class="vignette" aria-hidden="true"></div>
+<div class="power" id="power" aria-hidden="true"></div>
+<div class="reader" id="reader" role="dialog" aria-label="信"><div class="card" id="readerCard"></div></div>
+<div class="rotate" id="rotate"><div><div class="phone"></div><p>把手机横过来看</p></div></div>
+
+<script src="app.js"></script>
+<script type="module" src="scene2.js"></script>
+<script type="module" src="scene3.js"></script>
+<script type="module" src="scene4.js"></script>
+<script type="module" src="scene5.js"></script>
+</body>
+</html>
